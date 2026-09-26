@@ -1,49 +1,27 @@
 const fallbackStations=[{name:"Radio 357",freq:"ONLINE",stream:"https://stream.rcs.revma.com/ye5kghkgcm0uv"},{name:"TOK FM",freq:"ONLINE",stream:"https://radiostream.pl/tuba10-1.mp3"},{name:"ESKA ROCK",freq:"ONLINE",stream:"https://ic2.smcdn.pl/5380-1.mp3"}];
-let stations=[...fallbackStations];
-const audio=document.getElementById("audio"),play=document.getElementById("play"),progress=document.getElementById("progress"),volume=document.getElementById("volume"),freq=document.getElementById("freq"),station=document.getElementById("station"),status=document.getElementById("status"),country=document.getElementById("country"),countryStatus=document.getElementById("countryStatus"),detect=document.getElementById("detect");
+let stations=[...fallbackStations],current=null,failures=0,searchTimer;
+const audio=document.getElementById("audio"),play=document.getElementById("play"),progress=document.getElementById("progress"),volume=document.getElementById("volume"),freq=document.getElementById("freq"),station=document.getElementById("station"),track=document.getElementById("track"),status=document.getElementById("status"),country=document.getElementById("country"),countryStatus=document.getElementById("countryStatus"),detect=document.getElementById("detect"),countrySelect=document.getElementById("countrySelect"),search=document.getElementById("search"),searchButton=document.getElementById("searchButton"),favoritesEl=document.getElementById("favorites"),recentEl=document.getElementById("recent"),dial=document.querySelector(".dial"),meter=document.querySelector(".meter");
 const api="https://de1.api.radio-browser.info";
-
-function tune(s){audio.src=s.stream;freq.textContent=s.freq||"ONLINE";station.textContent=s.name;status.textContent="Station selected";document.querySelectorAll(".card").forEach((x,i)=>x.classList.toggle("active",stations[i]===s));play.textContent="▶"}
-
-function render(){document.querySelector(".cards").innerHTML=stations.map((s,i)=>'<button class="card '+(i===0?"active":"")+'" data-i="'+i+'"><b>'+((s.freq&&s.freq!=="ONLINE")?s.freq:"LIVE")+'</b><span>'+s.name+'</span><small>LIVE RADIO</small></button>').join("");document.querySelectorAll(".card").forEach(c=>c.onclick=()=>tune(stations[Number(c.dataset.i)]))}
-
-async function loadCountry(code,name){
-country.textContent=name+" ("+code+")";
-countryStatus.textContent="Finding live stations from this country…";
-try{
-const r=await fetch(api+"/json/stations/bycountrycodeexact/"+encodeURIComponent(code)+"?limit=18&hidebroken=true&order=votes&reverse=true");
-if(!r.ok)throw new Error("station request failed");
-const data=await r.json();
-const live=data.filter(s=>s.url_resolved&&s.url_resolved.startsWith("https://")&&s.lastcheckok!==false&&s.ssl_error!==true).map(s=>({name:s.name,freq:s.tags&&s.tags.includes("fm")?"FM":"ONLINE",stream:s.url_resolved})).filter(s=>s.stream).slice(0,9);
-if(live.length){stations=live;render();tune(stations[0]);countryStatus.textContent=live.length+" live stations found for your country."}
-else{stations=[...fallbackStations];render();tune(stations[0]);countryStatus.textContent="No browser-ready stations found; using FMOnline defaults."}
-}catch(e){stations=[...fallbackStations];render();tune(stations[0]);countryStatus.textContent="Country detected, but the station directory is unavailable right now."}
-}
-
-async function detectCountry(){
-country.textContent="Detecting country…";
-countryStatus.textContent="Checking your approximate internet location.";
-try{
-const r=await fetch("https://ipapi.co/json/");
-if(!r.ok)throw new Error("location request failed");
-const data=await r.json();
-if(!data.country_code)throw new Error("no country");
-await loadCountry(data.country_code,data.country_name||data.country_code);
-}catch(e){
-const tz=Intl.DateTimeFormat().resolvedOptions().timeZone||"";
-const guess=tz.split("/")[0]==="Europe"?"European region":"Unknown region";
-country.textContent=guess;
-countryStatus.textContent="Automatic country lookup was unavailable. Click Detect again to retry.";
-stations=[...fallbackStations];render();tune(stations[0]);
-}
-}
-
-play.onclick=async()=>{if(audio.paused){try{await audio.play();play.textContent="Ⅱ";status.textContent="On air"}catch(e){status.textContent="Stream unavailable in this browser"}}else{audio.pause();play.textContent="▶";status.textContent="Paused"}};
-volume.oninput=()=>audio.volume=volume.value;
-audio.volume=.8;
-audio.ontimeupdate=()=>{if(audio.duration)progress.value=audio.currentTime/audio.duration*100};
-progress.oninput=()=>{if(audio.duration)audio.currentTime=progress.value/100*audio.duration};
-detect.onclick=detectCountry;
-render();
-tune(stations[0]);
-detectCountry();
+const getJSON=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch{return d}};
+let favorites=getJSON("fmonline-favorites",[]),recent=getJSON("fmonline-recent",[]);
+function save(){localStorage.setItem("fmonline-favorites",JSON.stringify(favorites));localStorage.setItem("fmonline-recent",JSON.stringify(recent))}
+function isFav(s){return favorites.some(x=>x.stream===s.stream)}
+function addRecent(s){recent=[s,...recent.filter(x=>x.stream!==s.stream)].slice(0,8);save();renderLists()}
+function tune(s,auto=false){current=s;failures=0;audio.pause();audio.src=s.stream;freq.textContent=s.freq||"ONLINE";station.textContent=s.name;track.textContent=s.country?s.country+" • "+(s.codec||"LIVE RADIO"):"Live radio";status.textContent=auto?"Trying live stream…":"Station selected";play.textContent="▶";dial.classList.remove("tuning");void dial.offsetWidth;dial.classList.add("tuning");document.querySelectorAll(".card").forEach((x,i)=>x.classList.toggle("active",stations[i]===s));if("mediaSession"in navigator)navigator.mediaSession.metadata=new MediaMetadata({title:s.name,artist:s.country||"FMOnline",album:"Live Radio"});addRecent(s)}
+function render(){document.querySelector(".cards").innerHTML=stations.map((s,i)=>'<div class="card '+(i===0?"active":"")+'" data-i="'+i+'"><button class="fav '+(isFav(s)?"on":"")+'" data-fav="'+i+'" aria-label="Favorite">'+(isFav(s)?"★":"☆")+'</button><b>'+((s.freq&&s.freq!=="ONLINE")?s.freq:"LIVE")+'</b><span>'+escapeHTML(s.name)+'</span><small>'+(s.codec||"LIVE RADIO")+'</small></div>').join("");document.querySelectorAll(".card").forEach(c=>c.onclick=e=>{if(e.target.closest(".fav"))return;tune(stations[Number(c.dataset.i)])});document.querySelectorAll(".fav").forEach(b=>b.onclick=e=>{e.stopPropagation();const s=stations[Number(b.dataset.fav)];favorites=isFav(s)?favorites.filter(x=>x.stream!==s.stream):[...favorites,s];save();render();renderLists()})}
+function escapeHTML(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function renderLists(){favoritesEl.innerHTML=favorites.length?favorites.map((s,i)=>'<button class="mini" data-f="'+i+'"><strong>'+escapeHTML(s.name)+'</strong><span>★</span></button>').join(""):'<div class="empty">No favorites yet.</div>';recentEl.innerHTML=recent.length?recent.map((s,i)=>'<button class="mini" data-r="'+i+'"><strong>'+escapeHTML(s.name)+'</strong><span>'+escapeHTML(s.country||"LIVE")+'</span></button>').join(""):'<div class="empty">Your recent stations will appear here.</div>';favoritesEl.querySelectorAll("[data-f]").forEach(x=>x.onclick=()=>tune(favorites[Number(x.dataset.f)]));recentEl.querySelectorAll("[data-r]").forEach(x=>x.onclick=()=>tune(recent[Number(x.dataset.r)]))}
+function clean(data){return data.filter(s=>s.url_resolved&&s.url_resolved.startsWith("https://")&&s.lastcheckok!==false&&s.ssl_error!==true).map(s=>({name:s.name.trim(),freq:s.tags&&s.tags.includes("fm")?"FM":"ONLINE",stream:s.url_resolved,country:s.country,codec:s.codec})).filter(s=>s.stream)}
+async function loadCountry(code,name){country.textContent=name+" ("+code+")";countryStatus.textContent="Finding browser-ready stations…";try{const r=await fetch(api+"/json/stations/bycountrycodeexact/"+encodeURIComponent(code)+"?limit=40&hidebroken=true&order=votes&reverse=true");if(!r.ok)throw Error();const live=clean(await r.json()).slice(0,12);stations=live.length?live:[...fallbackStations];render();tune(stations[0],true);countryStatus.textContent=live.length?live.length+" live stations found for this country.":"No browser-ready stations found; using FMOnline defaults."}catch{stations=[...fallbackStations];render();tune(stations[0],true);countryStatus.textContent="Station directory unavailable right now."}}
+async function detectCountry(){country.textContent="Detecting country…";countryStatus.textContent="Checking approximate internet location.";try{const r=await fetch("https://ipapi.co/json/");if(!r.ok)throw Error();const d=await r.json();if(!d.country_code)throw Error();countrySelect.value=d.country_code;await loadCountry(d.country_code,d.country_name||d.country_code)}catch{country.textContent="Country unavailable";countryStatus.textContent="Automatic lookup unavailable. Choose a country manually.";stations=[...fallbackStations];render();tune(stations[0],true)}}
+async function loadCountries(){try{const r=await fetch(api+"/json/countries?order=name&reverse=false");const data=await r.json();countrySelect.innerHTML='<option value="">Choose any country…</option>'+data.map(c=>'<option value="'+c.iso_3166_1+'">'+escapeHTML(c.name)+" ("+c.iso_3166_1+")</option>").join("")}catch{}}
+async function searchStations(){const q=search.value.trim();if(!q)return;status.textContent="Searching worldwide…";try{const r=await fetch(api+"/json/stations/search?name="+encodeURIComponent(q)+"&limit=30&hidebroken=true&order=votes&reverse=true");if(!r.ok)throw Error();const found=clean(await r.json()).slice(0,12);stations=found.length?found:[...fallbackStations];render();status.textContent=found.length?found.length+" stations found.":"No browser-ready matches.";if(found.length)tune(found[0],true)}catch{status.textContent="Station search unavailable right now."}}
+play.onclick=async()=>{if(audio.paused){try{await audio.play();play.textContent="Ⅱ";status.textContent="On air";meter.classList.remove("paused")}catch{status.textContent="Stream unavailable in this browser";await fallback()}}else{audio.pause();play.textContent="▶";status.textContent="Paused";meter.classList.add("paused")}};
+async function fallback(){if(failures>=stations.length-1){status.textContent="No working stream found.";return}failures++;const next=stations[(stations.indexOf(current)+1)%stations.length];status.textContent="Stream failed — trying another station…";tune(next,true);try{await audio.play();play.textContent="Ⅱ";status.textContent="On air"}catch{setTimeout(fallback,150)}}
+audio.addEventListener("error",fallback);audio.addEventListener("stalled",()=>{if(!audio.paused)setTimeout(()=>{if(audio.readyState<3)fallback()},2500)});audio.addEventListener("playing",()=>{status.textContent="On air";meter.classList.remove("paused")});audio.addEventListener("pause",()=>meter.classList.add("paused"));
+volume.oninput=()=>audio.volume=volume.value;audio.volume=.8;
+audio.ontimeupdate=()=>{if(audio.duration)progress.value=audio.currentTime/audio.duration*100;document.getElementById("elapsed").textContent=audio.currentTime?new Date(audio.currentTime*1000).toISOString().slice(14,19):"00:00"};progress.oninput=()=>{if(audio.duration)audio.currentTime=progress.value/100*audio.duration};
+detect.onclick=detectCountry;countrySelect.onchange=()=>{if(countrySelect.value){const o=countrySelect.options[countrySelect.selectedIndex];loadCountry(countrySelect.value,o.textContent.replace(/\s\(.+\)$/,""))}};searchButton.onclick=searchStations;search.onkeydown=e=>{if(e.key==="Enter")searchStations()};search.oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{if(search.value.trim())searchStations()},600)};
+if("mediaSession"in navigator){navigator.mediaSession.setActionHandler("play",()=>play.click());navigator.mediaSession.setActionHandler("pause",()=>play.click())}
+render();renderLists();loadCountries();detectCountry();
+if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js"));
