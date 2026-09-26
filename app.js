@@ -25,7 +25,28 @@ audio.ontimeupdate=()=>{if(audio.duration)progress.value=audio.currentTime/audio
 detect.onclick=detectCountry;countrySelect.onchange=()=>{if(countrySelect.value){const o=countrySelect.options[countrySelect.selectedIndex];loadCountry(countrySelect.value,o.textContent.replace(/\s\(.+\)$/,""))}};searchButton.onclick=searchStations;random.onclick=randomStation;search.onkeydown=e=>{if(e.key==="Enter")searchStations()};search.oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{if(search.value.trim())searchStations()},600)};
 if("mediaSession"in navigator){navigator.mediaSession.setActionHandler("play",()=>play.click());navigator.mediaSession.setActionHandler("pause",()=>play.click())}
 render();renderLists();loadCountries();detectCountry();
-if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js"));const tvChannels=[...document.querySelectorAll(".tv-channel[data-url]")];
-function setMode(mode){const tv=mode==="tv";tvPanel.classList.toggle("hidden",!tv);radioPanel.classList.toggle("hidden",tv);radioMode.classList.toggle("active",!tv);tvMode.classList.toggle("active",tv);if(tv){audio.pause()}else{video.pause()}}
-function loadTV(url,name){if(!url)return;tvUrl.value=url;tvTitle.textContent=name||"TV mode";tvEmpty.textContent=name||"TV stream";tvStatus.textContent="Loading video stream…";video.src=url;video.load();video.play().then(()=>{tvStatus.textContent="On air"}).catch(()=>{tvStatus.textContent="Ready — press play";})}
-radioMode.onclick=()=>setMode("radio");tvMode.onclick=()=>setMode("tv");tvLoad.onclick=()=>loadTV(tvUrl.value.trim(),"Custom TV stream");tvUrl.onkeydown=e=>{if(e.key==="Enter")loadTV(tvUrl.value.trim(),"Custom TV stream")};tvFullscreen.onclick=()=>{if(video.requestFullscreen)video.requestFullscreen();else if(video.webkitEnterFullscreen)video.webkitEnterFullscreen()};tvChannels.forEach(b=>b.onclick=()=>loadTV(b.dataset.url,b.dataset.name));video.addEventListener("playing",()=>tvStatus.textContent="On air");video.addEventListener("error",()=>tvStatus.textContent="This stream could not be played by the browser.");
+if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js"));let tvAll=[];
+const tvChannelsEl=document.getElementById("tvChannels"),tvCountry=document.getElementById("tvCountry"),tvSearch=document.getElementById("tvSearch");
+async function loadTVDirectory(){
+  try{
+    const [channelsRes,streamsRes]=await Promise.all([
+      fetch("https://iptv-org.github.io/api/channels.json"),
+      fetch("https://iptv-org.github.io/api/streams.json")
+    ]);
+    if(!channelsRes.ok||!streamsRes.ok)throw Error();
+    const channels=await channelsRes.json(),streams=await streamsRes.json(),byId=new Map(channels.map(x=>[x.id,x]));
+    tvAll=streams.filter(x=>x.url&&x.url.startsWith("https://")&&x.channel&&byId.has(x.channel)&&!x.labels?.includes("Geo-blocked")).map(x=>({name:byId.get(x.channel).name||x.title,country:(byId.get(x.channel).country||"").toUpperCase(),url:x.url,title:x.title})).filter((x,i,a)=>a.findIndex(y=>y.url===x.url)===i);
+    const countries=[...new Set(tvAll.map(x=>x.country).filter(Boolean))].sort();
+    tvCountry.innerHTML='<option value="">All countries</option>'+countries.map(x=>'<option value="'+escapeHTML(x)+'">'+escapeHTML(x)+'</option>').join("");
+    renderTVDirectory();
+    tvStatus.textContent=tvAll.length+" public TV streams loaded";
+  }catch{tvChannelsEl.innerHTML='<div class="tv-loading">TV directory unavailable right now.</div>';tvStatus.textContent="Could not load the TV directory."}
+}
+function renderTVDirectory(){
+  const q=tvSearch.value.trim().toLowerCase(),cc=tvCountry.value;
+  const list=tvAll.filter(x=>(!cc||x.country===cc)&&(!q||x.name.toLowerCase().includes(q)||(x.title||"").toLowerCase().includes(q))).slice(0,60);
+  tvChannelsEl.innerHTML=list.length?list.map((x,i)=>'<button class="tv-channel" data-tv="'+i+'"><strong>'+escapeHTML(x.name)+'</strong><span>'+escapeHTML(x.country||"WORLD")+'</span><em>'+escapeHTML(x.title||"Live stream")+'</em></button>').join(""):'<div class="tv-loading">No browser-ready channels found.</div>';
+  tvChannelsEl.querySelectorAll("[data-tv]").forEach(b=>b.onclick=()=>{const list2=tvAll.filter(x=>(!cc||x.country===cc)&&(!q||x.name.toLowerCase().includes(q)||(x.title||"").toLowerCase().includes(q))).slice(0,60);const x=list2[Number(b.dataset.tv)];loadTV(x.url,x.name)});
+}
+tvCountry.onchange=renderTVDirectory;tvSearch.oninput=renderTVDirectory;
+loadTVDirectory();radioMode.onclick=()=>setMode("radio");tvMode.onclick=()=>setMode("tv");tvLoad.onclick=()=>loadTV(tvUrl.value.trim(),"Custom TV stream");tvUrl.onkeydown=e=>{if(e.key==="Enter")loadTV(tvUrl.value.trim(),"Custom TV stream")};tvFullscreen.onclick=()=>{if(video.requestFullscreen)video.requestFullscreen();else if(video.webkitEnterFullscreen)video.webkitEnterFullscreen()};tvChannels.forEach(b=>b.onclick=()=>loadTV(b.dataset.url,b.dataset.name));video.addEventListener("playing",()=>tvStatus.textContent="On air");video.addEventListener("error",()=>tvStatus.textContent="This stream could not be played by the browser.");
