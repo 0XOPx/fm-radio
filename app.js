@@ -14,7 +14,7 @@ try{
 const r=await fetch(api+"/json/stations/bycountrycodeexact/"+encodeURIComponent(code)+"?limit=18&hidebroken=true&order=votes&reverse=true");
 if(!r.ok)throw new Error("station request failed");
 const data=await r.json();
-const live=data.filter(s=>s.url_resolved&&/^https?:\\/\\//.test(s.url_resolved)).map(s=>({name:s.name,freq:s.tags&&s.tags.includes("fm")?"FM":"ONLINE",stream:s.url_resolved})).filter(s=>s.stream).slice(0,9);
+const live=data.filter(s=>s.url_resolved&&s.url_resolved.startsWith("http://")||s.url_resolved.startsWith("https://")).map(s=>({name:s.name,freq:s.tags&&s.tags.includes("fm")?"FM":"ONLINE",stream:s.url_resolved})).filter(s=>s.stream).slice(0,9);
 if(live.length){stations=live;render();tune(stations[0]);countryStatus.textContent=live.length+" live stations found for your country."}
 else{stations=[...fallbackStations];render();tune(stations[0]);countryStatus.textContent="No browser-ready stations found; using FMOnline defaults."}
 }catch(e){stations=[...fallbackStations];render();tune(stations[0]);countryStatus.textContent="Country detected, but the station directory is unavailable right now."}
