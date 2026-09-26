@@ -30,8 +30,8 @@ const tvChannelsEl=document.getElementById("tvChannels"),tvCountry=document.getE
 async function loadTVDirectory(){
   try{
     const [channelsRes,streamsRes]=await Promise.all([
-      fetch("https://iptv-org.github.io/api/channels.json"),
-      fetch("https://iptv-org.github.io/api/streams.json")
+      fetch("https://iptv-org.github.io/api/channels.json",{cache:"no-store"}),
+      fetch("https://iptv-org.github.io/api/streams.json",{cache:"no-store"})
     ]);
     if(!channelsRes.ok||!streamsRes.ok)throw Error();
     const channels=await channelsRes.json(),streams=await streamsRes.json(),byId=new Map(channels.map(x=>[x.id,x]));
